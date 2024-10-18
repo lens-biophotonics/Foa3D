@@ -39,7 +39,7 @@ def color_text(r, g, b, text):
     return clr_text
 
 
-def print_flushed(string_to_print=""):
+def print_flsh(string_to_print=""):
     """
     Print string and flush output data buffer.
 
@@ -102,7 +102,7 @@ def print_frangi_info(alpha, beta, gamma, scales_um, img_shp_um, in_slc_shp_um,
     if gamma is None:
         gamma = 'auto'
 
-    print_flushed(color_text(0, 191, 255, "\n3D Frangi Filter\n") + "\nSensitivity\n" + \
+    print_flsh(color_text(0, 191, 255, "\n3D Frangi Filter\n") + "\nSensitivity\n" + \
         f"• plate-like \u03B1: {alpha:.1e}\n• blob-like  \u03B2: {beta:.1e}\n• background \u03B3: {gamma}\n\n" + \
         f"Enhanced scales      [μm]: {scales_um}\nEnhanced diameters   [μm]: {4 * scales_um}\n")
 
@@ -131,7 +131,7 @@ def print_blur(sigma_um, psf_fwhm):
     None
     """
     psf_sz = np.max(psf_fwhm)
-    print_flushed(f"Gaussian blur σ      [μm]: ({sigma_um[0]:.3f}, {sigma_um[1]:.3f}, {sigma_um[2]:.3f})\n" + \
+    print_flsh(f"Gaussian blur σ      [μm]: ({sigma_um[0]:.3f}, {sigma_um[1]:.3f}, {sigma_um[2]:.3f})\n" + \
         f"Adjusted PSF FWHM    [μm]: ({psf_sz:.3f}, {psf_sz:.3f}, {psf_sz:.3f})")
 
 
@@ -149,7 +149,7 @@ def print_import_time(start_time):
     None
     """
     _, _, mins, secs = elapsed_time(start_time)
-    print_flushed(f"Image loaded in: {mins} min {secs:3.1f} s")
+    print_flsh(f"Image loaded in: {mins} min {secs:3.1f} s")
 
 
 def print_odf_info(odf_scales_um, odf_degrees):
@@ -168,7 +168,7 @@ def print_odf_info(odf_scales_um, odf_degrees):
     -------
     None
     """
-    print_flushed(color_text(0, 191, 255, "\n3D ODF Analysis\n") + \
+    print_flsh(color_text(0, 191, 255, "\n3D ODF Analysis\n") + \
         f"\nResolution   [μm]: {odf_scales_um}\n" + \
         f"Expansion degrees: {odf_degrees}\n")
 
@@ -181,7 +181,7 @@ def print_pipeline_heading():
     -------
     None
     """
-    print_flushed(color_text(0, 250, 154, "\n3D Fiber Orientation Analysis"))
+    print_flsh(color_text(0, 250, 154, "\n3D Fiber Orientation Analysis"))
 
 
 def print_prepro_heading():
@@ -192,7 +192,7 @@ def print_prepro_heading():
     -------
     None
     """
-    print_flushed(color_text(0, 191, 255, "\n\nMicroscopy Image Preprocessing\n") + \
+    print_flsh(color_text(0, 191, 255, "\n\nMicroscopy Image Preprocessing\n") + \
         "\n                              Z      Y      X")
 
 
@@ -212,7 +212,7 @@ def print_native_res(px_sz, psf_fwhm):
     -------
     None
     """
-    print_flushed(f"Pixel size           [μm]: ({px_sz[0]:.3f}, {px_sz[1]:.3f}, {px_sz[2]:.3f})\n" + \
+    print_flsh(f"Pixel size           [μm]: ({px_sz[0]:.3f}, {px_sz[1]:.3f}, {px_sz[2]:.3f})\n" + \
         f"PSF FWHM             [μm]: ({psf_fwhm[0]:.3f}, {psf_fwhm[1]:.3f}, {psf_fwhm[2]:.3f})")
 
 
@@ -229,7 +229,7 @@ def print_new_res(px_sz_iso):
     -------
     None
     """
-    print_flushed(f"Adjusted pixel size  [μm]: ({px_sz_iso[0]:.3f}, {px_sz_iso[1]:.3f}, {px_sz_iso[2]:.3f})\n")
+    print_flsh(f"Adjusted pixel size  [μm]: ({px_sz_iso[0]:.3f}, {px_sz_iso[1]:.3f}, {px_sz_iso[2]:.3f})\n")
 
 
 def print_slicing_info(img_shp_um, slc_shp_um, tot_slc_num, px_sz, img_item_sz):
@@ -269,8 +269,8 @@ def print_slicing_info(img_shp_um, slc_shp_um, tot_slc_num, px_sz, img_item_sz):
     max_slc_sz = img_item_sz * np.prod(np.divide(slc_shp_um, px_sz))
 
     # print info
-    print_flushed("\n                              Z      Y      X")
-    print_flushed(f"Total image shape    [μm]: ({img_shp_um[0]:.1f}, {img_shp_um[1]:.1f}, {img_shp_um[2]:.1f})\n" + \
+    print_flsh("\n                              Z      Y      X")
+    print_flsh(f"Total image shape    [μm]: ({img_shp_um[0]:.1f}, {img_shp_um[1]:.1f}, {img_shp_um[2]:.1f})\n" + \
         f"Total image size     [MB]: {np.ceil(img_sz / 1024**2).astype(int)}\n\n" + \
         f"Image slice shape    [μm]: ({slc_shp_um[0]:.1f}, {slc_shp_um[1]:.1f}, {slc_shp_um[2]:.1f})\n" + \
         f"Image slice size     [MB]: {np.ceil(max_slc_sz / 1024**2).astype(int)}\n" + \
@@ -293,12 +293,12 @@ def print_soma_masking(msk_bc):
     """
     prt = 'Soma mask: '
     if msk_bc:
-        print_flushed(f'{prt}active\n')
+        print_flsh(f'{prt}active\n')
     else:
         print(f'{prt}not active\n')
 
 
-def print_image_shape(cli_args, img, ch_ax):
+def print_image_shape(cli_args, in_img):
     """
     Print 3D microscopy image shape.
 
@@ -307,11 +307,9 @@ def print_image_shape(cli_args, img, ch_ax):
     cli_args: see ArgumentParser.parse_args
         populated namespace of command line arguments
 
-    img: numpy.ndarray (shape=(Z,Y,X))
-        microscopy volume image
-
-    ch_ax: int
-        RGB image channel axis (either 1 or 3)
+    in_img: dict
+        input image dictionary
+        ('img_data': image data, 'ts_msk': tissue sample mask, 'ch_ax': channel axis)
 
     Returns
     -------
@@ -322,10 +320,13 @@ def print_image_shape(cli_args, img, ch_ax):
     px_sz_z = cli_args.px_size_z
     px_sz_xy = cli_args.px_size_xy
 
+    # get channel axis (RGB image only)
+    ch_ax = in_img['ch_ax']
+
     # get image shape (ignore channel axis)
-    img_shp = img.shape
+    img_shp = in_img['img_data'].shape
     if ch_ax is not None:
         img_shp = np.delete(img_shp, ch_ax)
 
-    print_flushed("\n                              Z      Y      X\nImage shape          [μm]: " + \
+    print_flsh("\n                              Z      Y      X\nImage shape          [μm]: " + \
         f"({img_shp[0] * px_sz_z:.1f}, {img_shp[1] * px_sz_xy:.1f}, {img_shp[2] * px_sz_xy:.1f})")

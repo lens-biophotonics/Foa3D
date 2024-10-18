@@ -90,7 +90,7 @@ def create_memory_map(shape, dtype, name='tmp', tmp_dir=None, arr=None, mmap_mod
 
     if tmp_dir is None:
         tmp_dir = tempfile.mkdtemp()
-    mmap_path = path.join(tmp_dir, name + '.npy')
+    mmap_path = path.join(tmp_dir, name + '.mmap')
 
     if path.exists(mmap_path):
         unlink(mmap_path)   

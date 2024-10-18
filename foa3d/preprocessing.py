@@ -2,7 +2,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 from skimage.transform import resize
 
-from foa3d.printing import (print_blur, print_flushed,
+from foa3d.printing import (print_blur, print_flsh,
                             print_new_res, print_prepro_heading)
 from foa3d.utils import fwhm_to_sigma
 
@@ -67,11 +67,11 @@ def config_anisotropy_correction(px_sz, psf_fwhm):
         if cndt_2:
             print_new_res(px_sz_iso)
         else:
-            print_flushed()
+            print_flsh()
 
     # skip line
     else:
-        print_flushed()
+        print_flsh()
 
     return smooth_sigma, px_sz_iso
 

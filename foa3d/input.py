@@ -13,7 +13,7 @@ except ImportError:
 
 from foa3d.output import create_save_dirs
 from foa3d.preprocessing import config_anisotropy_correction
-from foa3d.printing import (color_text, print_flushed, print_image_shape,
+from foa3d.printing import (color_text, print_flsh, print_image_shape,
                             print_import_time, print_native_res)
 from foa3d.utils import (create_background_mask, create_memory_map, detect_ch_axis,
                          get_item_bytes, get_config_label)
@@ -73,8 +73,6 @@ def get_cli_parser():
                                  'use one thread per logical core if None')
     cli_parser.add_argument('-r', '--ram', type=float, default=None,
                             help='maximum RAM available to the Frangi filter stage [GB]: use all if None')
-    cli_parser.add_argument('-m', '--mmap', action='store_true', default=False,
-                            help='create a memory-mapped array of input microscopy or fiber orientation images')
     cli_parser.add_argument('--px-size-xy', type=float, default=0.878, help='lateral pixel size [μm]')
     cli_parser.add_argument('--px-size-z', type=float, default=1.0, help='longitudinal pixel size [μm]')
     cli_parser.add_argument('--psf-fwhm-x', type=float, default=0.692, help='PSF FWHM along horizontal x-axis [μm]')
@@ -192,11 +190,6 @@ def get_file_info(cli_args):
         True when pre-estimated fiber orientation vectors
         are directly provided to the pipeline
 
-    is_mmap: bool
-        create a memory-mapped array of the 3D microscopy image,
-        increasing the parallel processing performance
-        (the image will be preliminarily loaded to RAM)
-
     mip_msk: bool
         apply tissue reconstruction mask (binarized MIP)
 
@@ -205,7 +198,6 @@ def get_file_info(cli_args):
     """
 
     # get microscopy image path and name
-    is_mmap = cli_args.mmap
     img_path = cli_args.image_path
     img_name = path.basename(img_path)
     split_name = img_name.split('.')
@@ -227,7 +219,7 @@ def get_file_info(cli_args):
     cfg_lbl = get_config_label(cli_args)
     img_name = f'{img_name}_{cfg_lbl}'
 
-    return img_path, img_name, img_fmt, is_tiled, is_fovec, is_mmap, msk_mip, fb_ch
+    return img_path, img_name, img_fmt, is_tiled, is_fovec, msk_mip, fb_ch
 
 
 def get_frangi_config(cli_args):
@@ -376,8 +368,8 @@ def get_resource_config(cli_args):
 
 def load_microscopy_image(cli_args):
     """
-    Load 3D microscopy image from TIFF, NumPy or ZetaStitcher .yml file.
-    Alternatively, the processing pipeline accepts as input NumPy or HDF5
+    Load 3D microscopy image from TIFF, or ZetaStitcher .yml file.
+    Alternatively, the processing pipeline accepts as input TIFF or NumPy
     files of fiber orientation vector data: in this case, the Frangi filter
     stage will be skipped.
 
@@ -388,59 +380,52 @@ def load_microscopy_image(cli_args):
 
     Returns
     -------
-    img: numpy.ndarray or NumPy memory-map object
-        3D microscopy image or array of fiber orientation vectors
+    in_img: dict
+        input image dictionary
+        ('img_data': image data, 'ts_msk': tissue sample mask,
+         'ch_ax': channel axis, 'img_name': image filename,
+         'is_vec': vector field flag)
 
-    ts_msk: numpy.ndarray (dtype=bool)
-        tissue reconstruction binary mask
-
-    ch_ax: int
-        RGB image channel axis (either 1 or 3, or None for grayscale images)
-
-    is_fovec: bool
-        True when pre-estimated fiber orientation vectors
-        are directly provided to the pipeline
-
-    save_dir: list (dtype=str)
-        saving subdirectory string paths
-
-    tmp_dir: str
-        temporary file directory
-
-    img_name: str
-        microscopy image filename
+    save_dirs: dict
+        saving directories
+        ('frangi': Frangi filter, 'odf': ODF analysis, 'tmp': temporary files)
     """
 
     # retrieve input file information
-    img_path, img_name, img_fmt, is_tiled, is_fovec, is_mmap, msk_mip, fb_ch = get_file_info(cli_args)
+    img_path, img_name, img_fmt, is_tiled, is_vec, msk_mip, fb_ch = get_file_info(cli_args)
 
     # create saving directory
-    save_dir, tmp_dir = create_save_dirs(img_path, img_name, cli_args, is_fovec=is_fovec)
+    save_dirs = create_save_dirs(img_path, img_name, cli_args, is_vec=is_vec)
 
     # import fiber orientation vector data
     tic = perf_counter()
-    if is_fovec:
-        img = load_orient(img_path, img_name, img_fmt, is_mmap=is_mmap, tmp_dir=tmp_dir)
-        ts_msk = None
+    if is_vec:
+        in_img = load_orient(img_path, img_name, img_fmt, tmp_dir=save_dirs['tmp'])
 
     # import raw 3D microscopy image
     else:
-        img, ts_msk, ch_ax = load_raw(img_path, img_name, img_fmt,
-                                      is_tiled=is_tiled, is_mmap=is_mmap, tmp_dir=tmp_dir, msk_mip=msk_mip, fb_ch=fb_ch)
+        in_img = load_raw(img_path, img_name, img_fmt,
+                          is_tiled=is_tiled, tmp_dir=save_dirs['tmp'], msk_mip=msk_mip, fb_ch=fb_ch)
+
+    # add image name to input data dictionary
+    in_img['img_name'] = img_name
+
+    # add vector field flag
+    in_img['is_vec'] = is_vec
 
     # print import time
     print_import_time(tic)
 
     # print volume image shape
-    if not is_fovec:
-        print_image_shape(cli_args, img, ch_ax)
+    if not is_vec:
+        print_image_shape(cli_args, in_img)
     else:
-        print_flushed()
+        print_flsh()
 
-    return img, ts_msk, ch_ax, is_fovec, save_dir, tmp_dir, img_name
+    return in_img, save_dirs
 
 
-def load_orient(img_path, img_name, img_fmt, is_mmap=False, tmp_dir=None):
+def load_orient(img_path, img_name, img_fmt, tmp_dir=None):
     """
     Load array of 3D fiber orientations.
 
@@ -455,46 +440,48 @@ def load_orient(img_path, img_name, img_fmt, is_mmap=False, tmp_dir=None):
     img_fmt: str
         format of the 3D microscopy image
 
-    is_mmap: bool
-        create a memory-mapped array of the 3D microscopy image,
-        increasing the parallel processing performance
-        (the image will be preliminarily loaded to RAM)
-
     tmp_dir: str
         temporary file directory
 
     Returns
     -------
-    img: numpy.ndarray
-        3D fiber orientation vectors
+    in_img: dict
+        input image dictionary
+        ('img_data': image data, 'ts_msk': tissue sample mask, 'ch_ax': channel axis)
     """
 
     # print heading
-    print_flushed(color_text(0, 191, 255, "\nFiber Orientation Data Import\n"))
+    print_flsh(color_text(0, 191, 255, "\nFiber Orientation Data Import\n"))
 
     # load fiber orientations
     if img_fmt == 'npy':
-        img = np.load(img_path, mmap_mode='r')
-        if is_mmap:
-            img = create_memory_map(img.shape, dtype=img.dtype, name=img_name, tmp_dir=tmp_dir, arr=img, mmap_mode='r')
+        vec_img = np.load(img_path, mmap_mode='r')
     elif img_fmt == 'tif' or img_fmt == 'tiff':
-        img = tiff.imread(img_path)
-        ch_ax = detect_ch_axis(img)
-        if ch_ax == 1:
-            img = np.moveaxis(img, 1, -1)
-        if is_mmap:
-            img = create_memory_map(img.shape, dtype=img.dtype, name=img_name, tmp_dir=tmp_dir, arr=img, mmap_mode='r')
+        vec_img = tiff.imread(img_path)
+        ch_ax = detect_ch_axis(vec_img)
+        if ch_ax != 3:
+            vec_img = np.moveaxis(vec_img, ch_ax, -1)
+
+        # memory-map the input TIFF image
+        vec_img = create_memory_map(vec_img.shape, dtype=vec_img.dtype, name=img_name,
+                                    tmp_dir=tmp_dir, arr=vec_img, mmap_mode='r')
 
     # check array shape
-    if img.ndim != 4:
+    if vec_img.ndim != 4:
         raise ValueError('Invalid 3D fiber orientation dataset (ndim != 4)!')
     else:
-        print_flushed(f"Loading {img_path} orientation vector field...\n")
+        print_flsh(f"Loading {img_path} orientation vector field...\n")
 
-        return img
+        # populate input image dictionary
+        in_img = dict()
+        in_img['img_data'] = vec_img
+        in_img['ts_msk'] = None
+        in_img['ch_ax'] = None
+
+        return in_img
 
 
-def load_raw(img_path, img_name, img_fmt, is_tiled=False, is_mmap=False, tmp_dir=None, msk_mip=False, fb_ch=1):
+def load_raw(img_path, img_name, img_fmt, is_tiled=False, tmp_dir=None, msk_mip=False, fb_ch=1):
     """
     Load 3D microscopy image.
 
@@ -512,15 +499,10 @@ def load_raw(img_path, img_name, img_fmt, is_tiled=False, is_mmap=False, tmp_dir
     is_tiled: bool
         True for tiled reconstructions aligned using ZetaStitcher
 
-    is_mmap: bool
-        create a memory-mapped array of the 3D microscopy image,
-        increasing the parallel processing performance
-        (the image will be preliminarily loaded to RAM)
-
     tmp_dir: str
         temporary file directory
 
-    mip_msk: bool
+    msk_mip: bool
         apply tissue reconstruction mask (binarized MIP)
 
     fb_ch: int
@@ -528,38 +510,30 @@ def load_raw(img_path, img_name, img_fmt, is_tiled=False, is_mmap=False, tmp_dir
 
     Returns
     -------
-    img: numpy.ndarray or NumPy memory-map object
-        3D microscopy image
-
-    ts_msk: numpy.ndarray (dtype=bool)
-        tissue reconstruction binary mask
-
-    ch_ax: int
-        RGB image channel axis (either 1 or 3)
+    in_img: dict
+        input image dictionary
+        ('img_data': image data, 'ts_msk': tissue sample mask, 'ch_ax': channel axis)
     """
 
     # print heading
-    print_flushed(color_text(0, 191, 255, "\nMicroscopy Image Import\n"))
+    print_flsh(color_text(0, 191, 255, "\nMicroscopy Image Import\n"))
 
     # load microscopy tiled reconstruction (aligned using ZetaStitcher)
     if is_tiled:
-        print_flushed(f"Loading {img_path} tiled reconstruction...\n")
+        print_flsh(f"Loading {img_path} tiled reconstruction...\n")
         img = VirtualFusedVolume(img_path)
 
     # load microscopy z-stack
     else:
-        print_flushed(f"Loading {img_path} z-stack...\n")
+        print_flsh(f"Loading {img_path} z-stack...\n")
         img_fmt = img_fmt.lower()
-        if img_fmt == 'npy':
-            img = np.load(img_path)
-        elif img_fmt == 'tif' or img_fmt == 'tiff':
+        if img_fmt == 'tif' or img_fmt == 'tiff':
             img = tiff.imread(img_path)
         else:
             raise ValueError('Unsupported image format!')
 
         # create image memory map
-        if is_mmap:
-            img = create_memory_map(img.shape, dtype=img.dtype, name=img_name, tmp_dir=tmp_dir, arr=img, mmap_mode='r')
+        img = create_memory_map(img.shape, dtype=img.dtype, name=img_name, tmp_dir=tmp_dir, arr=img, mmap_mode='r')
 
     # detect channel axis (RGB images)
     ch_ax = detect_ch_axis(img)
@@ -574,6 +548,8 @@ def load_raw(img_path, img_name, img_fmt, is_tiled=False, is_mmap=False, tmp_dir
         # RGB image
         elif dims == 4:
             img_fbr = img[:, fb_ch, :, :] if ch_ax == 1 else img[..., fb_ch]
+        else:
+            raise ValueError('Invalid image (ndim != 3 and ndim != 4)!')
 
         # compute MIP (naive for loop to minimize the required RAM)
         ts_mip = np.zeros(img_fbr.shape[1:], dtype=img_fbr.dtype)
@@ -585,4 +561,10 @@ def load_raw(img_path, img_name, img_fmt, is_tiled=False, is_mmap=False, tmp_dir
     else:
         ts_msk = None
 
-    return img, ts_msk, ch_ax
+    # populate input image dictionary
+    in_img = dict()
+    in_img['img_data'] = img
+    in_img['ts_msk'] = ts_msk
+    in_img['ch_ax'] = ch_ax
+
+    return in_img

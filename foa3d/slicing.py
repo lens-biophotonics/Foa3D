@@ -493,17 +493,18 @@ def generate_slice_lists(in_slc_shp, img_shp, batch_sz, px_rsz_ratio, ovlp=0, ms
 
     Returns
     -------
-    in_rng_lst: list
-        list of input slice index ranges
+    slc_rng: dict
+        in_rng_lst: list
+            list of input slice index ranges
 
-    in_pad_lst: list
-        list of slice padding arrays
+        in_pad_lst: list
+            list of slice padding arrays
 
-    out_rng_lst: list
-        list of output slice index ranges
+        out_rng_lst: list
+            list of output slice index ranges
 
-    bc_rng_lst: list
-        (optional) list of neuronal body slice index ranges
+        bc_rng_lst: list
+            (optional) list of neuronal body slice index ranges
 
     out_slc_shp: numpy.ndarray (shape=(3,), dtype=int)
         shape of the processed image slices [px]
@@ -556,7 +557,14 @@ def generate_slice_lists(in_slc_shp, img_shp, batch_sz, px_rsz_ratio, ovlp=0, ms
     if batch_sz > tot_slc_num:
         batch_sz = tot_slc_num
 
-    return in_rng_lst, in_pad_lst, out_rng_lst, bc_rng_lst, out_slc_shp, tot_slc_num, batch_sz
+    # fill slice range dictionary
+    slc_rng = dict()
+    slc_rng['in_rng_lst'] = in_rng_lst
+    slc_rng['in_pad_lst'] = in_pad_lst
+    slc_rng['out_rng_lst'] = out_rng_lst
+    slc_rng['bc_rng_lst'] = bc_rng_lst
+
+    return slc_rng, out_slc_shp, tot_slc_num, batch_sz
 
 
 def slice_image(img, rng, ch, ch_ax, ts_msk=None):
