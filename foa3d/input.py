@@ -4,6 +4,7 @@ from time import perf_counter
 from os import path
 
 import numpy as np
+import psutil
 import tifffile as tiff
 
 try:
@@ -71,7 +72,7 @@ def get_cli_parser():
                             help='number of parallel threads used by the Frangi filter stage: '
                                  'use one thread per logical core if None')
     cli_parser.add_argument('-r', '--ram', type=float, default=None,
-                            help='maximum RAM available to the Frangi filter stage [GB]: use all if None')
+                            help='available RAM [GB]: use all if None')
     cli_parser.add_argument('--px-size-xy', type=float, default=1.0, help='lateral pixel size [μm]')
     cli_parser.add_argument('--px-size-z', type=float, default=1.0, help='longitudinal pixel size [μm]')
     cli_parser.add_argument('--psf-fwhm-x', type=float, default=1.0, help='PSF FWHM along horizontal x-axis [μm]')
@@ -531,7 +532,7 @@ def load_microscopy_image(cli_args):
 
     # import fiber orientation vector data or raw 3D microscopy image
     tic = perf_counter()
-    load_data(in_img, save_dirs['tmp'], msk_mip=msk_mip)
+    load_data(in_img, msk_mip=msk_mip)
 
     # print input data information
     get_image_size(in_img)
@@ -544,7 +545,7 @@ def load_microscopy_image(cli_args):
     return in_img, save_dirs
 
 
-def load_data(in_img, tmp_dir, msk_mip=False):
+def load_data(in_img, msk_mip=False, min_freemem_prc=25.0):
     """
     Load 3D microscopy data.
 
@@ -580,11 +581,12 @@ def load_data(in_img, tmp_dir, msk_mip=False):
             is_tiled: bool
                 True for tiled reconstructions aligned using ZetaStitcher
 
-    tmp_dir: str
-        path to temporary folder
-
     msk_mip: bool
         apply tissue reconstruction mask (binarized MIP)
+
+    min_freemem_prc: float
+        the minimum percentage of RAM that must remain free
+        for the Frangi filter stage
 
     Returns
     -------
@@ -592,29 +594,40 @@ def load_data(in_img, tmp_dir, msk_mip=False):
     """
     print_flsh(color_text(0, 191, 255, "\nMicroscopy Image Import\n"))
 
-    # load tiled reconstruction (aligned using ZetaStitcher)
+    # tiled reconstruction (aligned using ZetaStitcher)
     if in_img['is_tiled']:
         print_flsh(f"Loading {in_img['path']} tiled reconstruction...\n")
         img = VirtualFusedVolume(in_img['path'])
         ch_ax = detect_ch_axis(img)
         is_vec = False
 
-    # load z-stack
+    # fused reconstruction
     else:
-        print_flsh(f"Loading {in_img['path']} z-stack...\n")
-
         img_fmt = in_img['fmt'].lower()
         if img_fmt in ('tif', 'tiff'):
-            img = tiff.imread(in_img['path'])
-            ch_ax = detect_ch_axis(img)
+            free_mem = psutil.virtual_memory().available * (1 - min_freemem_prc / 100)
+            with tiff.TiffFile(in_img['path']) as tif:
+
+                # get image size [B]
+                page = tif.pages[0]
+                num_px = page.shape[0] * page.shape[1] * (page.shape[2] if len(page.shape) > 2 else 1)
+                img_sz = num_px * page.dtype.itemsize
+
+                # load image into RAM
+                if img_sz < free_mem:
+                    print_flsh(f"Loading {in_img['path']} into RAM...\n")
+                    img = tiff.imread(in_img['path'])
+                # or use memory mapping if required
+                else:
+                    print_flsh(f"⚠️ {in_img['path']} too large for RAM: using memory mapping...")
+                    img = tiff.imread(in_img['path'], aszarr=False, out='memmap')
 
             # detect vector field input
             is_vec = img.ndim == 4 and img.dtype in (np.float32, float, 'float32')
+            ch_ax = detect_ch_axis(img)
             if is_vec:
                 if ch_ax != 3:
                     img = np.moveaxis(img, ch_ax, -1)
-
-            img = create_memory_map(img.dtype, name=in_img['name'], tmp=tmp_dir, arr=img, mmap_mode='r')
 
         else:
             raise ValueError('Unsupported image format!')

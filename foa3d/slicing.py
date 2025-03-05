@@ -3,7 +3,6 @@ from itertools import product
 import numpy as np
 import psutil
 
-from numba import njit
 from foa3d.utils import get_available_cores
 
 
@@ -622,7 +621,7 @@ def get_slicing_config(in_img, frangi_cfg, mem_growth=149.7, shp_thr=7):
     # maximum RAM not provided: use all
     ram = frangi_cfg['ram']
     if ram is None:
-        ram = psutil.virtual_memory()[1]
+        ram = psutil.virtual_memory().available
     ram /= mem_growth
 
     # number of logical cores
