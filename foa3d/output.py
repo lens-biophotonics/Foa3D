@@ -150,8 +150,8 @@ def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', ram=None):
             for z in range(nz):
                 zs = z * dz
                 tif.write(nd_array[zs:zs + dz, ...],
-                          contiguous=True,
                           resolution=(1 / px_sz_x, 1 / px_sz_y),
+                          compression='zlib',
                           metadata=metadata)
 
     # save array to NIfTI file
