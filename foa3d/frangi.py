@@ -64,30 +64,6 @@ def compute_dominant_eigen(hessian):
     return srt_eigval, dom_eigvec
 
 
-def compute_fractional_anisotropy(eigenval):
-    """
-    Compute structure tensor fractional anisotropy
-    as in Schilling et al. (2018).
-
-    Parameters
-    ----------
-    eigenval: numpy.ndarray (axis order=(Z,Y,X,C), dtype=float)
-        structure tensor eigenvalues (at the best local spatial scale)
-
-    Returns
-    -------
-    fa: numpy.ndarray (shape=(3,), dtype=float)
-        fractional anisotropy
-    """
-    fa = np.sqrt(0.5 * divide_nonzero(
-                 np.square((eigenval[..., 0] - eigenval[..., 1])) +
-                 np.square((eigenval[..., 0] - eigenval[..., 2])) +
-                 np.square((eigenval[..., 1] - eigenval[..., 2])),
-                 np.sum(eigenval ** 2, axis=-1)))
-
-    return fa
-
-
 def compute_frangi_features(eigen1, eigen2, eigen3, gamma):
     """
     Compute the basic image features employed by the Frangi filter.
@@ -382,9 +358,6 @@ def init_frangi_arrays(in_img, cfg, tmp_dir):
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 initialized orientation colormap image
 
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                initialized fractional anisotropy image
-
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 initialized Frangi-enhanced image
 
@@ -410,7 +383,6 @@ def init_frangi_arrays(in_img, cfg, tmp_dir):
     if cfg['exp_all']:
         frangi = create_memory_map('uint8', shape=tot_shp, name='frangi', tmp=tmp_dir)
         fbr_msk = create_memory_map('uint8', shape=tot_shp, name='fbr_msk', tmp=tmp_dir)
-        fa = create_memory_map('float32', shape=tot_shp, name='fa', tmp=tmp_dir)
 
         # soma channel array
         if in_img['msk_bc']:
@@ -418,20 +390,20 @@ def init_frangi_arrays(in_img, cfg, tmp_dir):
         else:
             bc_msk = None
     else:
-        frangi, fbr_msk, fa, bc_msk = 4 * (None,)
+        frangi, fbr_msk, bc_msk = 3 * (None,)
 
     # fiber orientation arrays
     fbr_vec = create_memory_map('float32', shape=vec_shp, name='vec', tmp=tmp_dir)
     fbr_clr = create_memory_map('uint8', shape=vec_shp, name='clr', tmp=tmp_dir)
 
     # fill output image dictionary
-    out_img = {'vec': fbr_vec, 'clr': fbr_clr, 'fa': fa, 'frangi': frangi,
+    out_img = {'vec': fbr_vec, 'clr': fbr_clr, 'frangi': frangi,
                'iso': iso_fbr, 'fbr_msk': fbr_msk, 'bc_msk': bc_msk, 'px_sz': cfg['px_sz']}
 
     return out_img
 
 
-def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, hsv=False, _fa=False):
+def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, hsv=False):
     """
     Apply 3D Frangi filter to 3D microscopy image.
 
@@ -455,9 +427,6 @@ def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, hsv=False
     hsv: bool
         generate an HSV colormap of 3D fiber orientations
 
-    _fa: bool
-        compute fractional anisotropy
-
     Returns
     -------
     out_slc: dict
@@ -468,9 +437,6 @@ def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, hsv=False
 
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap image
-
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy image
 
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=float)
                 Frangi's vesselness likelihood image
@@ -494,16 +460,15 @@ def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, hsv=False
     fbr_vec = np.take_along_axis(eigvec, max_idx, axis=0).squeeze(axis=0)
 
     # compute fractional anisotropy image and fiber orientation color map
-    fa = compute_fractional_anisotropy(eigval) if _fa else None
     fbr_clr = hsv_orient_cmap(fbr_vec) if hsv else rgb_orient_cmap(fbr_vec)
 
     # fill slice output dictionary
-    out_slc = {'vec': fbr_vec, 'clr': fbr_clr, 'fa': fa, 'frangi': frangi}
+    out_slc = {'vec': fbr_vec, 'clr': fbr_clr, 'frangi': frangi}
 
     return out_slc
 
 
-def mask_background(out_slc, ref_img=None, method='yen', invert=False, ornt_keys=('vec', 'clr', 'fa')):
+def mask_background(out_slc, ref_img=None, method='yen', invert=False, ornt_keys=('vec', 'clr')):
     """
     Mask fiber orientation data arrays.
 
@@ -517,9 +482,6 @@ def mask_background(out_slc, ref_img=None, method='yen', invert=False, ornt_keys
 
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap
-
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy
 
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image slice (fiber probability image)
@@ -660,9 +622,6 @@ def write_frangi_arrays(out_img, out_slc, rng, z_out=None):
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap image
 
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy image
-
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image (fiber probability image)
 
@@ -686,9 +645,6 @@ def write_frangi_arrays(out_img, out_slc, rng, z_out=None):
 
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap
-
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy
 
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image slice (fiber probability image)
@@ -719,10 +675,6 @@ def write_frangi_arrays(out_img, out_slc, rng, z_out=None):
     out_img['vec'][vec_rng] = out_slc['vec'][z_out, ...]
     out_img['clr'][vec_rng] = out_slc['clr'][z_out, ...]
     out_img['iso'][rng] = out_slc['iso'][z_out, ...].astype(np.uint8)
-
-    # optional output images: fractional anisotropy
-    if out_img['fa'] is not None:
-        out_img['fa'][rng] = out_slc['fa'][z_out, ...]
 
     # optional output images: Frangi filter response
     if out_img['frangi'] is not None:
