@@ -102,9 +102,6 @@ def parallel_frangi_over_slices(cli_args, save_dirs, in_img):
             clr: NumPy memory-map object (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap image
 
-            fa: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy image
-
             frangi: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image (fiber probability image)
 
@@ -136,7 +133,6 @@ def parallel_frangi_over_slices(cli_args, save_dirs, in_img):
         # conduct a Frangi-filter-based analysis of fiber orientations using concurrent workers
         print_frangi_config(in_img, frangi_cfg)
         slc_rng = generate_slice_ranges(in_img, frangi_cfg)
-        _fa = out_img['fa'] is not None
         t_start = perf_counter()
         gpu = frangi_cfg['gpu']
         print("Processing on gpu: " + str(gpu), flush=True)
@@ -307,9 +303,6 @@ def frangi_analysis(s, in_img, out_img, frangi_cfg, t_start, _fa=False):
             clr: NumPy memory-map object (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap image
 
-            fa: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy image
-
             frangi: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image (fiber probability image)
 
@@ -390,9 +383,6 @@ def frangi_analysis(s, in_img, out_img, frangi_cfg, t_start, _fa=False):
 
     t_start: float
         start time [s]
-
-    _fa: bool
-        compute fractional anisotropy
 
     Returns
     -------
@@ -917,9 +907,6 @@ def analyze_fibers_out(out_slc, iso_fbr_slc, cfg, out_rng, ts_msk_rsz):
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap
 
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy
-
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image slice (fiber probability image)
 
@@ -1062,9 +1049,6 @@ def reject_brain_cells(bc_slc, out_slc, rsz_ratio, out_rng, bc_thr='yen'):
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap
 
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy
-
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image slice (fiber probability image)
 
@@ -1096,9 +1080,6 @@ def reject_brain_cells(bc_slc, out_slc, rsz_ratio, out_rng, bc_thr='yen'):
 
             clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap
-
-            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy
 
             frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image slice (fiber probability image)
@@ -1153,9 +1134,6 @@ def parallel_odf_over_scales(cli_args, save_dirs, out_img, img_name):
 
             clr: NumPy memory-map object (axis order=(Z,Y,X,C), dtype=uint8)
                 orientation colormap image
-
-            fa: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
-                fractional anisotropy image
 
             frangi: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
                 Frangi-enhanced image (fiber probability image)

@@ -4,7 +4,6 @@ import numpy as np
 import psutil
 import nvidia_smi
 
-from numba import njit
 from foa3d.utils import get_available_cores
 
 

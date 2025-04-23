@@ -150,8 +150,8 @@ def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', mem=None):
             for z in range(nz):
                 zs = z * dz
                 tif.write(nd_array[zs:zs + dz, ...],
-                          compression='zlib',
                           resolution=(1 / px_sz_x, 1 / px_sz_y),
+                          compression='zlib',
                           metadata=metadata)
 
     # save array to NIfTI file
@@ -182,9 +182,6 @@ def save_frangi_arrays(save_dir, img_name, out_img, mem=None):
 
         fbr_vec_clr: NumPy memory-map object (axis order=(Z,Y,X,C), dtype=uint8)
             orientation colormap image
-
-        fa_img: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
-            fractional anisotropy image
 
         frangi_img: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
             Frangi-enhanced image (fiber probability)
