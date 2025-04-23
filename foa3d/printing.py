@@ -165,7 +165,7 @@ def print_frangi_config(in_img, cfg):
             rsz: numpy.ndarray (shape=(3,), dtype=float)
                 3D image resize ratio
 
-            ram: float
+            mem: float
                     maximum RAM available to the Frangi filter stage [B]
 
             jobs: int
@@ -215,7 +215,7 @@ def print_frangi_config(in_img, cfg):
     print_flsh(f"[Parallel(n_jobs={batch_sz})]: Using backend ThreadingBackend with {batch_sz} concurrent workers.")
 
 
-def print_frangi_progress(start_time, batch, tot, not_bg, verbose=5):
+def print_frangi_progress(start_time, tot, verbose=5):
     """
     Print Frangi filter progress.
 
@@ -224,14 +224,8 @@ def print_frangi_progress(start_time, batch, tot, not_bg, verbose=5):
     start_time: float
         start time [s]
 
-    batch: int
-        slice batch size
-
     tot: int
         total number of image slices
-
-    not_bg: bool
-        foreground slice flag
 
     verbose: int
         verbosity level (print info only every "verbose" slices)
@@ -244,11 +238,11 @@ def print_frangi_progress(start_time, batch, tot, not_bg, verbose=5):
     slc_cnt += 1
 
     # print only every N=verbose image slices
-    if (slc_cnt % verbose == 0 and not_bg) or slc_cnt == tot:
+    if (slc_cnt % verbose == 0) or slc_cnt == tot:
         prog = 100 * slc_cnt / tot
         _, hrs, mins, secs = elapsed_time(start_time)
         print_flsh(
-            f"[Parallel(n_jobs={batch})]:\t{slc_cnt}/{tot} done\t|\telapsed: {hrs} hr {mins} min {secs} s\t{prog:.1f}%")
+            f"[Progress]:\t{slc_cnt}/{tot} done\t|\telapsed: {hrs} hr {mins} min {secs} s\t{prog:.1f}%")
 
 
 def print_image_info(in_img):

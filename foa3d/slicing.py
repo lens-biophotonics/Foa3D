@@ -2,13 +2,13 @@ from itertools import product
 
 import numpy as np
 import psutil
+import nvidia_smi
 
 from numba import njit
 from foa3d.utils import get_available_cores
 
 
-@njit(cache=True)
-def adjust_axis_range(ax_iter, img_shp, slc_per_ax, start, stop, ovlp=0):
+def adjust_axis_range(ax_iter, slc_shp, img_shp, slc_per_ax, start, stop, ovlp=0, shp_thr=7):
     """
     Trim slice axis range at image boundaries
     and adjust padded ranges accordingly.
@@ -17,6 +17,9 @@ def adjust_axis_range(ax_iter, img_shp, slc_per_ax, start, stop, ovlp=0):
     ----------
     ax_iter: int
         iteration counter along axis
+
+    slc_shp: int
+        slice shape along axis [px]
 
     img_shp: int
         total image shape along axis [px]
@@ -32,6 +35,9 @@ def adjust_axis_range(ax_iter, img_shp, slc_per_ax, start, stop, ovlp=0):
 
     ovlp: int
         overlapping range between slices along each axis [px]
+
+    shp_thr: int
+        minimum slice side [px]
 
     Returns
     -------
@@ -58,9 +64,14 @@ def adjust_axis_range(ax_iter, img_shp, slc_per_ax, start, stop, ovlp=0):
         stop = img_shp
 
     # handle image residuals at boundaries
-    if ax_iter == slc_per_ax - 1:
-        pad[1] = ovlp
-        stop = img_shp
+    if ax_iter == slc_per_ax - 2:
+        if np.remainder(img_shp, slc_shp) < shp_thr:
+            pad[1] = ovlp
+            stop = img_shp
+
+    elif ax_iter == slc_per_ax - 1:
+        if np.remainder(img_shp, slc_shp) < shp_thr and slc_per_ax > 1:
+            stop = None
 
     return start, stop, pad
 
@@ -89,8 +100,7 @@ def check_background(img, ts_msk=None, ts_thr=1e-4):
     return not_bg
 
 
-@njit(cache=True)
-def compute_axis_range(ax, ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=False):
+def compute_axis_range(ax, ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=False, shp_thr=7):
     """
     Adjust image slice coordinates at boundaries.
 
@@ -118,6 +128,9 @@ def compute_axis_range(ax, ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=
     flip: bool
         flip axes
 
+    shp_thr: int
+        minimum slice side [px]
+
     Returns
     -------
     start: int
@@ -140,12 +153,13 @@ def compute_axis_range(ax, ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=
         stop = img_shp[ax] - start_tmp
 
     # adjust start and stop coordinates
-    start, stop, pad = adjust_axis_range(ax_iter[ax], img_shp[ax], slc_per_dim[ax], start, stop, ovlp=ovlp)
+    start, stop, pad = adjust_axis_range(ax_iter[ax], slc_shp[ax], img_shp[ax], slc_per_dim[ax], start, stop,
+                                         ovlp=ovlp, shp_thr=shp_thr)
 
     return start, stop, pad
 
 
-def compute_slice_range(ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=False):
+def compute_slice_range(ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=False, shp_thr=7):
     """
     Compute basic slice coordinates from microscopy volumetric image.
 
@@ -170,6 +184,9 @@ def compute_slice_range(ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=Fal
     flip: bool
         flip axes
 
+    shp_thr: int
+        minimum slice side [px]
+
     Returns
     -------
     rng: np.ndarray
@@ -183,8 +200,12 @@ def compute_slice_range(ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=Fal
     slc = tuple()
     pad = np.zeros((dim, 2), dtype=np.int64)
     for ax in range(dim):
-        start, stop, pad[ax] = compute_axis_range(ax, ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=ovlp, flip=flip)
-        slc += (slice(start, stop, 1),)
+        start, stop, pad[ax] = compute_axis_range(ax, ax_iter, slc_shp, img_shp, slc_per_dim,
+                                                  ovlp=ovlp, flip=flip, shp_thr=shp_thr)
+        if stop is not None:
+            slc += (slice(start, stop, 1),)
+        else:
+            slc += (None,)
 
     # generate range array
     rng = np.index_exp[slc]
@@ -192,7 +213,7 @@ def compute_slice_range(ax_iter, slc_shp, img_shp, slc_per_dim, ovlp=0, flip=Fal
     return rng, pad
 
 
-def compute_overlap(smooth_sigma, frangi_sigma_um, rsz_ratio=None, trunc=2):
+def compute_overlap(smooth_sigma, frangi_sigma_px, rsz_ratio=None, trunc=2):
     """
     Compute lateral slice extension range
     for coping with smoothing-related boundary artifacts.
@@ -203,7 +224,7 @@ def compute_overlap(smooth_sigma, frangi_sigma_um, rsz_ratio=None, trunc=2):
         3D standard deviation of the smoothing Gaussian filter [px]
 
     frangi_sigma_um: numpy.ndarray (dtype=float)
-        analyzed spatial scales [μm]
+        analyzed spatial scales [px]
 
     rsz_ratio: numpy.ndarray (shape=(3,), dtype=float)
         3D image resize ratio
@@ -217,7 +238,7 @@ def compute_overlap(smooth_sigma, frangi_sigma_um, rsz_ratio=None, trunc=2):
     ovlp: int
         overlapping range between image slices along each axis [px]
     """
-    sigma = np.max(frangi_sigma_um) / rsz_ratio
+    sigma = np.max(frangi_sigma_px) / rsz_ratio
     if smooth_sigma is not None:
         sigma = np.concatenate((smooth_sigma, sigma))
 
@@ -425,7 +446,7 @@ def generate_slice_ranges(in_img, cfg):
             rsz: numpy.ndarray (shape=(3,), dtype=float)
                 3D image resize ratio
 
-            ram: float
+            mem: float
                     maximum RAM available to the Frangi filter stage [B]
 
             jobs: int
@@ -466,19 +487,24 @@ def generate_slice_ranges(in_img, cfg):
     # compute i/o image slice index ranges
     out_slc_shp = np.ceil(np.multiply(cfg['rsz'], cfg['slc_shp'])).astype(int)
     out_img_shp = np.ceil(np.multiply(cfg['rsz'], in_img['shape'])).astype(int)
-    slc_per_dim = np.floor(np.divide(in_img['shape'], cfg['slc_shp'])).astype(int)
+    slc_per_dim = np.ceil(np.divide(in_img['shape'], cfg['slc_shp'])).astype(int)
     slc_rng = []
     for zyx in product(range(slc_per_dim[0]), range(slc_per_dim[1]), range(slc_per_dim[2])):
         in_rng, pad = compute_slice_range(zyx, cfg['slc_shp'], in_img['shape'], slc_per_dim, ovlp=cfg['ovlp'])
-        out_rng, _ = compute_slice_range(zyx, out_slc_shp, out_img_shp, slc_per_dim)
 
-        # (optional) neuronal body channel
-        if in_img['msk_bc']:
-            bc_rng, _ = compute_slice_range(zyx, cfg['slc_shp'], in_img['shape'], slc_per_dim)
-        else:
-            bc_rng = None
+        if None not in in_rng:
+            out_rng, _ = compute_slice_range(zyx, out_slc_shp, out_img_shp, slc_per_dim)
 
-        slc_rng.append({'in': in_rng, 'out': out_rng, 'pad': pad, 'bc': bc_rng})
+            # (optional) neuronal body channel
+            if in_img['msk_bc']:
+                bc_rng, _ = compute_slice_range(zyx, cfg['slc_shp'], in_img['shape'], slc_per_dim)
+            else:
+                bc_rng = None
+
+            slc_rng.append({'in': in_rng, 'out': out_rng, 'pad': pad, 'bc': bc_rng})
+
+    # get total number of processed slices
+    cfg.update({'tot_slc': len(slc_rng)})
 
     return slc_rng
 
@@ -576,7 +602,7 @@ def get_slicing_config(in_img, frangi_cfg, mem_growth=149.7, shp_thr=7):
             rsz: numpy.ndarray (shape=(3,), dtype=float)
                 3D image resize ratio
 
-            ram: float
+            mem: float
                     maximum RAM available to the Frangi filter stage [B]
 
             jobs: int
@@ -595,10 +621,19 @@ def get_slicing_config(in_img, frangi_cfg, mem_growth=149.7, shp_thr=7):
     None
     """
     # maximum RAM not provided: use all
-    ram = frangi_cfg['ram']
-    if ram is None:
-        ram = psutil.virtual_memory()[1]
-    ram /= mem_growth
+    mem = frangi_cfg['mem']
+    gpu = frangi_cfg['gpu']
+    if mem is None:
+        if gpu:
+            nvidia_smi.nvmlInit()
+            handle = nvidia_smi.nvmlDeviceGetHandleByIndex(0)
+            mem_info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
+            mem = mem_info.free
+            nvidia_smi.nvmlShutdown()
+            mem_growth = 180
+        else:
+            mem = psutil.virtual_memory()[1]
+    mem /= mem_growth
 
     # number of logical cores
     jobs = frangi_cfg['jobs']
@@ -608,19 +643,22 @@ def get_slicing_config(in_img, frangi_cfg, mem_growth=149.7, shp_thr=7):
 
     # compute the shape of basic microscopy image slices
     slc_shp = np.array([-1])
-    batch_sz = np.min([jobs, num_cpu]).astype(int) + 1
-    ovlp = compute_overlap(frangi_cfg['smooth_sd'], frangi_cfg['scales_um'], rsz_ratio=frangi_cfg['rsz'])
+    if gpu:
+        batch_sz = np.min([1, num_cpu]).astype(int) + 1
+    else:
+        batch_sz = np.min([jobs, num_cpu]).astype(int) + 1
+    ovlp = compute_overlap(frangi_cfg['smooth_sd'], frangi_cfg['scales_px'], rsz_ratio=frangi_cfg['rsz'])
     while np.any(slc_shp < shp_thr):
         batch_sz -= 1
         if batch_sz == 0:
             raise ValueError(
                 "Basic image slices do not fit the available RAM: decrease spatial scales and/or maximum scale value!")
 
-        slc_shp = compute_slice_shape(in_img['shape'], in_img['item_sz'], slc_sz=ram/batch_sz, ovlp=ovlp)
+        slc_shp = compute_slice_shape(in_img['shape'], in_img['item_sz'], slc_sz=mem/batch_sz, ovlp=ovlp)
 
     # update Frangi filter configuration dictionary
     tot_slc = np.prod(np.floor(np.divide(in_img['shape'], slc_shp)).astype(int))
-    frangi_cfg.update({'batch': min(batch_sz, tot_slc), 'slc_shp': slc_shp, 'ovlp': ovlp, 'tot_slc': tot_slc})
+    frangi_cfg.update({'batch': min(batch_sz, tot_slc), 'slc_shp': slc_shp, 'ovlp': ovlp})
 
 
 def slice_image(img, rng, ch_ax, ch, ts_msk=None):

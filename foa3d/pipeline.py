@@ -2,7 +2,11 @@ from time import perf_counter
 import numpy as np
 from joblib import Parallel, delayed
 
-from foa3d.frangi import (frangi_filter, init_frangi_arrays, mask_background,
+import threading
+import concurrent.futures as cf
+from queue import Queue
+
+from foa3d.frangi import (frangi_filter, frangi_filter_out, init_frangi_arrays, mask_background,
                           write_frangi_arrays)
 from foa3d.input import get_frangi_config, get_resource_config
 from foa3d.odf import (compute_odf_map, generate_odf_background,
@@ -17,10 +21,9 @@ from foa3d.slicing import (check_background, get_slicing_config,
 from foa3d.spharm import get_sph_harm_norm_factors
 from foa3d.utils import get_available_cores
 
-
 def parallel_frangi_over_slices(cli_args, save_dirs, in_img):
     """
-    Apply 3D Frangi filter to basic microscopy image slices using parallel threads.
+    Apply 3D Frangi filter to basic microscopy image slices using parallel threads or gpu.
 
     Parameters
     ----------
@@ -135,16 +138,95 @@ def parallel_frangi_over_slices(cli_args, save_dirs, in_img):
         slc_rng = generate_slice_ranges(in_img, frangi_cfg)
         _fa = out_img['fa'] is not None
         t_start = perf_counter()
-        with Parallel(n_jobs=frangi_cfg['batch'], prefer='threads') as parallel:
-            parallel(delayed(frangi_analysis)(s, in_img, out_img, frangi_cfg, t_start, _fa=_fa) for s in slc_rng)
+        gpu = frangi_cfg['gpu']
+        print("Processing on gpu: " + str(gpu), flush=True)
+
+        if gpu:
+            jobs = frangi_cfg['jobs']
+            num_cpu = get_available_cores()
+            if jobs is None:
+                jobs = num_cpu
+            in_jobs = jobs // 2
+            out_jobs = jobs // 2
+            input_q = Queue(maxsize=20)
+            output_q = Queue(maxsize=30)
+
+            def frangi_worker():
+                while True:
+                    got = input_q.get()
+                    if got is None:
+                        input_q.task_done()
+                        for q in range(out_jobs):
+                            output_q.put(None)
+                        break
+
+                    iso_fbr_slc, ts_msk_rsz, s, t_start = got
+
+                    cfg = frangi_cfg
+
+                    frangi, eigvec, eigval, st_eigval = frangi_filter(iso_fbr_slc, scales_px=cfg['scales_px'],
+                                alpha=cfg['alpha'], beta=cfg['beta'], gamma=cfg['gamma'], gpu=cfg["gpu"],_fa=_fa)
+
+                    output_q.put([ts_msk_rsz, s, t_start, iso_fbr_slc, frangi, eigvec, eigval, st_eigval])
+
+                    input_q.task_done()
+
+
+            def output_worker():
+                while True:
+                    got = output_q.get()
+                    if got is None:
+                        output_q.task_done()
+                        break
+
+                    ts_msk_rsz, s, t_start, iso_fbr_slc, frangi, eigvec, eigval, st_eigval = got
+
+                    cfg = frangi_cfg
+
+                    out_slc = frangi_filter_out(frangi, eigvec, eigval, st_eigval, hsv=cfg['hsv_cmap'], _fa=_fa)
+
+                    out_slc = analyze_fibers_out(out_slc, iso_fbr_slc, cfg, s["out"], ts_msk_rsz)
+
+                    frangi_analysis_out(s, out_slc, in_img, out_img, cfg, t_start)
+
+                    output_q.task_done()
+
+            output_threads = []
+            for t in range(out_jobs):
+                output_threads.append(threading.Thread(target=output_worker))
+                output_threads[t].start()
+
+            frangi_thread = threading.Thread(target=frangi_worker)
+            frangi_thread.start()
+
+            with cf.ThreadPoolExecutor(in_jobs) as pool:
+                for s in slc_rng:
+                    _ = pool.submit(
+                        queue_slice,
+                        s,
+                        in_img,
+                        frangi_cfg,
+                        t_start,
+                        input_q,
+                    )
+
+            input_q.put(None)
+
+            frangi_thread.join()
+            for t in output_threads:
+                t.join()
+
+        else:
+            with Parallel(n_jobs=frangi_cfg['batch'], prefer='threads') as parallel:
+                parallel(delayed(frangi_analysis)(s, in_img, out_img, frangi_cfg, t_start, _fa=_fa) for s in slc_rng)
+
 
         # save output arrays to file
-        save_frangi_arrays(save_dirs['frangi'], in_img['name'], out_img, ram=frangi_cfg['ram'])
+        save_frangi_arrays(save_dirs['frangi'], in_img['name'], out_img, mem=frangi_cfg['mem'])
 
     return out_img
 
-
-def frangi_analysis(rng, in_img, out_img, cfg, t_start, _fa=False):
+def frangi_analysis(s, in_img, out_img, frangi_cfg, t_start, _fa=False):
     """
     Conduct a Frangi-based fiber orientation analysis
     on basic slices selected from the whole volumetric microscopy image.
@@ -283,7 +365,7 @@ def frangi_analysis(rng, in_img, out_img, cfg, t_start, _fa=False):
             rsz: numpy.ndarray (shape=(3,), dtype=float)
                 3D image resize ratio
 
-            ram: float
+            mem: float
                     maximum RAM available to the Frangi filter stage [B]
 
             jobs: int
@@ -316,6 +398,188 @@ def frangi_analysis(rng, in_img, out_img, cfg, t_start, _fa=False):
     -------
     None
     """
+
+    iso_fbr_slc, ts_msk_rsz = frangi_analysis_in(s, in_img, frangi_cfg)
+
+    if iso_fbr_slc is not None:
+
+        cfg = frangi_cfg
+
+        frangi, eigvec, eigval, st_eigval = frangi_filter(iso_fbr_slc, scales_px=cfg['scales_px'],
+                                    alpha=cfg['alpha'], beta=cfg['beta'], gamma=cfg['gamma'], _fa=_fa)
+
+        out_slc = frangi_filter_out(frangi, eigvec, eigval, st_eigval, hsv=cfg['hsv_cmap'], _fa=_fa)
+
+        out_slc = analyze_fibers_out(out_slc, iso_fbr_slc, cfg, s["out"], ts_msk_rsz)
+
+        frangi_analysis_out(s, out_slc, in_img, out_img, cfg, t_start)
+    else: 
+        print_frangi_progress(t_start, cfg['tot_slc'])
+
+
+def queue_slice(
+        s,
+        in_img,
+        frangi_cfg,
+        t_start,
+        queue,
+):
+
+    iso_fbr_slc, ts_msk_rsz = frangi_analysis_in(s, in_img, frangi_cfg)
+
+    if iso_fbr_slc is not None:
+        queue.put([iso_fbr_slc, ts_msk_rsz, s, t_start])
+    else:
+        print_frangi_progress(t_start, frangi_cfg['tot_slc'])
+
+    return
+
+
+def frangi_analysis_in(rng, in_img, cfg):
+    """
+    Conduct a Frangi-based fiber orientation analysis
+    on basic slices selected from the whole volumetric microscopy image.
+
+    Parameters
+    ----------
+    rng: dict
+        in: np.ndarray
+            3D input slice range [px]
+
+        pad: np.ndarray
+            3D slice padding range [px]
+
+        out: np.ndarray
+            3D output slice range [px]
+
+        bc: np.ndarray
+            (optional) brain cell soma slice range
+
+    in_img: dict
+        input image dictionary
+
+            data: NumPy memory-map object (axis order=(Z,Y,X) or (Z,Y,X,C) or (Z,C,Y,X))
+                3D microscopy image
+
+            ch_ax: int
+                RGB image channel axis (either 1, 3, or None for grayscale images)
+
+            ts_msk: numpy.ndarray (dtype=bool)
+                tissue reconstruction binary mask
+
+            fb_ch: int
+                neuronal fibers channel
+
+            bc_ch: int
+                brain cell soma channel
+
+            msk_bc: bool
+                if True, mask neuronal bodies within
+                the optionally provided channel
+
+            psf_fwhm: numpy.ndarray (shape=(3,), dtype=float)
+                3D FWHM of the PSF [μm]
+
+            px_sz: numpy.ndarray (shape=(3,), dtype=float)
+                pixel size [μm]
+
+            path: str
+                path to the 3D microscopy image
+
+            name: str
+                name of the 3D microscopy image
+
+            fmt: str
+                format of the 3D microscopy image
+
+            is_tiled: bool
+                True for tiled reconstructions aligned using ZetaStitcher
+
+            is_vec: bool
+                vector field flag
+
+            shape: numpy.ndarray (shape=(3,), dtype=int)
+                total image shape
+
+            shape_um: numpy.ndarray (shape=(3,), dtype=float)
+                total image shape [μm]
+
+            item_sz: int
+                image item size [B]
+
+    cfg: dict
+        Frangi filter configuration
+
+            alpha: float
+                plate-like score sensitivity
+
+            beta: float
+                blob-like score sensitivity
+
+            gamma: float
+                background score sensitivity
+
+            scales_px: numpy.ndarray (dtype=float)
+                Frangi filter scales [px]
+
+            scales_um: numpy.ndarray (dtype=float)
+                Frangi filter scales [μm]
+
+            smooth_sd: numpy.ndarray (shape=(3,), dtype=int)
+                3D standard deviation of the smoothing Gaussian filter [px]
+
+            px_sz: numpy.ndarray (shape=(3,), dtype=float)
+                pixel size [μm]
+
+            fb_thr: float or str
+                image thresholding applied to the Frangi filter response
+
+            msk_bc: bool
+                if True, mask neuronal bodies within
+                the optionally provided channel
+
+            hsv_cmap: bool
+                generate HSV colormap of 3D fiber orientations
+
+            exp_all: bool
+                export all images
+
+            rsz: numpy.ndarray (shape=(3,), dtype=float)
+                3D image resize ratio
+
+            ram: float
+                    maximum RAM available to the Frangi filter stage [B]
+
+            jobs: int
+                number of parallel jobs (threads)
+                used by the Frangi filter stage
+
+            batch: int
+                slice batch size
+
+            slc_shp: numpy.ndarray (shape=(3,), dtype=int)
+                shape of the basic image slices
+                analyzed using parallel threads [px]
+
+            ovlp: int
+                overlapping range between image slices along each axis [px]
+
+            tot_slc: int
+                total number of image slices
+
+            z_out: NumPy slice object
+                output z-range
+
+    Returns
+    -------
+    iso_fbr_slc: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+            isotropic fiber image slice
+
+    ts_msk_rsz: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                tissue mask sliceaxis order=(Z,Y,X), dtype=uint8)
+                fiber mask slice
+    """
+
     # extract image slice
     fbr_slc, ts_msk_slc = \
         slice_image(in_img['data'], rng['in'], in_img['ch_ax'], ch=in_img['fb_ch'], ts_msk=in_img['ts_msk'])
@@ -323,20 +587,220 @@ def frangi_analysis(rng, in_img, out_img, cfg, t_start, _fa=False):
     # process non-background image slice
     not_bg = check_background(fbr_slc, ts_msk=ts_msk_slc)
     if not_bg:
-        out_slc = analyze_fibers(fbr_slc, cfg, rng['out'], rng['pad'], ts_msk=ts_msk_slc, _fa=_fa)
+        iso_fbr_slc, ts_msk_rsz = analyze_fibers_in(fbr_slc, cfg, rng['pad'], ts_msk=ts_msk_slc)
 
-        # (optional) brain cell soma masking
-        if rng['bc'] is not None:
-            bc_slc, _ = slice_image(in_img['data'], rng['bc'], in_img['ch_ax'], ch=in_img['bc_ch'])
-            out_slc = reject_brain_cells(bc_slc, out_slc, cfg['rsz'], rng['out'])
+        return iso_fbr_slc, ts_msk_rsz
 
-        # write memory-mapped output arrays
-        write_frangi_arrays(out_img, out_slc, rng['out'], z_out=cfg['z_out'])
-
-    print_frangi_progress(t_start, cfg['batch'], cfg['tot_slc'], not_bg)
+    else:
+        return None, None
 
 
-def analyze_fibers(fbr_slc, cfg, out_rng, pad_rng, ts_msk=None, _fa=False):
+def frangi_analysis_out(rng, out_slc, in_img, out_img, cfg, t_start):
+    """
+    Conduct a Frangi-based fiber orientation analysis
+    on basic slices selected from the whole volumetric microscopy image.
+
+    Parameters
+    ----------
+    rng: dict
+        in: np.ndarray
+            3D input slice range [px]
+
+        pad: np.ndarray
+            3D slice padding range [px]
+
+        out: np.ndarray
+            3D output slice range [px]
+
+        bc: np.ndarray
+            (optional) brain cell soma slice range
+
+    out_slc: dict
+        slice output dictionary
+
+            vec: numpy.ndarray (axis order=(Z,Y,X,C), dtype=float)
+                3D fiber orientation field
+
+            clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
+                orientation colormap
+
+            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                fractional anisotropy
+
+            frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                Frangi-enhanced image slice (fiber probability image)
+
+            iso: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                isotropic fiber image slice
+
+            ts_msk: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                tissue mask slice
+
+            fbr_msk: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                fiber mask slice
+
+    in_img: dict
+        input image dictionary
+
+            data: NumPy memory-map object (axis order=(Z,Y,X) or (Z,Y,X,C) or (Z,C,Y,X))
+                3D microscopy image
+
+            ch_ax: int
+                RGB image channel axis (either 1, 3, or None for grayscale images)
+
+            ts_msk: numpy.ndarray (dtype=bool)
+                tissue reconstruction binary mask
+
+            fb_ch: int
+                neuronal fibers channel
+
+            bc_ch: int
+                brain cell soma channel
+
+            msk_bc: bool
+                if True, mask neuronal bodies within
+                the optionally provided channel
+
+            psf_fwhm: numpy.ndarray (shape=(3,), dtype=float)
+                3D FWHM of the PSF [μm]
+
+            px_sz: numpy.ndarray (shape=(3,), dtype=float)
+                pixel size [μm]
+
+            path: str
+                path to the 3D microscopy image
+
+            name: str
+                name of the 3D microscopy image
+
+            fmt: str
+                format of the 3D microscopy image
+
+            is_tiled: bool
+                True for tiled reconstructions aligned using ZetaStitcher
+
+            is_vec: bool
+                vector field flag
+
+            shape: numpy.ndarray (shape=(3,), dtype=int)
+                total image shape
+
+            shape_um: numpy.ndarray (shape=(3,), dtype=float)
+                total image shape [μm]
+
+            item_sz: int
+                image item size [B]
+
+    out_img: dict
+        output image dictionary
+
+            vec: NumPy memory-map object (axis order=(Z,Y,X,C), dtype=float32)
+                fiber orientation vector field
+
+            clr: NumPy memory-map object (axis order=(Z,Y,X,C), dtype=uint8)
+                orientation colormap image
+
+            fa: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
+                fractional anisotropy image
+
+            frangi: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
+                Frangi-enhanced image (fiber probability image)
+
+            iso: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
+                isotropic fiber image
+
+            fbr_msk: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
+                fiber mask image
+
+            bc_msk: NumPy memory-map object (axis order=(Z,Y,X), dtype=uint8)
+                soma mask image
+
+            px_sz: numpy.ndarray (shape=(3,), dtype=float)
+                output pixel size [μm]
+
+    cfg: dict
+        Frangi filter configuration
+
+            alpha: float
+                plate-like score sensitivity
+
+            beta: float
+                blob-like score sensitivity
+
+            gamma: float
+                background score sensitivity
+
+            scales_px: numpy.ndarray (dtype=float)
+                Frangi filter scales [px]
+
+            scales_um: numpy.ndarray (dtype=float)
+                Frangi filter scales [μm]
+
+            smooth_sd: numpy.ndarray (shape=(3,), dtype=int)
+                3D standard deviation of the smoothing Gaussian filter [px]
+
+            px_sz: numpy.ndarray (shape=(3,), dtype=float)
+                pixel size [μm]
+
+            fb_thr: float or str
+                image thresholding applied to the Frangi filter response
+
+            msk_bc: bool
+                if True, mask neuronal bodies within
+                the optionally provided channel
+
+            hsv_cmap: bool
+                generate HSV colormap of 3D fiber orientations
+
+            exp_all: bool
+                export all images
+
+            rsz: numpy.ndarray (shape=(3,), dtype=float)
+                3D image resize ratio
+
+            mem: float
+                    maximum RAM available to the Frangi filter stage [B]
+
+            jobs: int
+                number of parallel jobs (threads)
+                used by the Frangi filter stage
+
+            batch: int
+                slice batch size
+
+            slc_shp: numpy.ndarray (shape=(3,), dtype=int)
+                shape of the basic image slices
+                analyzed using parallel threads [px]
+
+            ovlp: int
+                overlapping range between image slices along each axis [px]
+
+            tot_slc: int
+                total number of image slices
+
+            z_out: NumPy slice object
+                output z-range
+
+    t_start: float
+        start time [s]
+
+    Returns
+    -------
+    None
+    """
+
+    # (optional) brain cell soma masking
+    if rng['bc'] is not None:
+        bc_slc, _ = slice_image(in_img['data'], rng['bc'], in_img['ch_ax'], ch=in_img['bc_ch'])
+        out_slc = reject_brain_cells(bc_slc, out_slc, cfg['rsz'], rng['out'])
+
+    # write memory-mapped output arrays
+    write_frangi_arrays(out_img, out_slc, rng['out'], z_out=cfg['z_out'])
+
+    print_frangi_progress(t_start, cfg['tot_slc'])
+
+
+def analyze_fibers_in(fbr_slc, cfg, pad_rng, ts_msk=None):
     """
     Analyze 3D fiber orientations exploiting a Frangi-filter-based
     unsupervised enhancement of tubular structures.
@@ -409,17 +873,136 @@ def analyze_fibers(fbr_slc, cfg, out_rng, pad_rng, ts_msk=None, _fa=False):
             z_out: NumPy slice object
                 output z-range
 
-    out_rng: NumPy slice object
-        output range
-
     pad_rng: numpy.ndarray (axis order=(Z,Y,X))
         image padding range
 
     ts_msk: numpy.ndarray (dtype=bool)
         tissue reconstruction binary mask
 
-    _fa: bool
-        compute fractional anisotropy
+    Returns
+    -------
+    iso_fbr_slc: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                isotropic fiber image slice
+
+    ts_msk_rsz: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                tissue mask slice
+    """
+    # preprocess fiber slice (adaptive blurring and downsampling)
+    iso_fbr_slc, pad_rsz, ts_msk_rsz = \
+        correct_anisotropy(fbr_slc, cfg['rsz'], sigma=cfg['smooth_sd'], pad=pad_rng, ts_msk=ts_msk)
+
+    # pad fiber slice if required
+    if pad_rsz is not None:
+        iso_fbr_slc = np.pad(iso_fbr_slc, pad_rsz, mode='reflect')
+
+        # pad tissue mask if available
+        if ts_msk_rsz is not None:
+            ts_msk_rsz = np.pad(ts_msk_rsz, pad_rsz, mode='constant')
+
+    return iso_fbr_slc, ts_msk_rsz
+
+def analyze_fibers_out(out_slc, iso_fbr_slc, cfg, out_rng, ts_msk_rsz):
+    """
+    Analyze 3D fiber orientations exploiting a Frangi-filter-based
+    unsupervised enhancement of tubular structures.
+
+    Parameters
+    ----------
+    out_slc: dict
+        slice output dictionary
+
+            vec: numpy.ndarray (axis order=(Z,Y,X,C), dtype=float)
+                3D fiber orientation field
+
+            clr: numpy.ndarray (axis order=(Z,Y,X,C), dtype=uint8)
+                orientation colormap
+
+            fa: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                fractional anisotropy
+
+            frangi: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                Frangi-enhanced image slice (fiber probability image)
+
+            iso: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                isotropic fiber image slice
+
+            ts_msk: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                tissue mask slice
+
+            fbr_msk: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                fiber mask slice
+
+    iso_fbr_slc: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
+                isotropic fiber image slice
+
+    cfg: dict
+        Frangi filter configuration
+
+            alpha: float
+                plate-like score sensitivity
+
+            beta: float
+                blob-like score sensitivity
+
+            gamma: float
+                background score sensitivity
+
+            scales_px: numpy.ndarray (dtype=float)
+                Frangi filter scales [px]
+
+            scales_um: numpy.ndarray (dtype=float)
+                Frangi filter scales [μm]
+
+            smooth_sd: numpy.ndarray (shape=(3,), dtype=int)
+                3D standard deviation of the smoothing Gaussian filter [px]
+
+            px_sz: numpy.ndarray (shape=(3,), dtype=float)
+                pixel size [μm]
+
+            fb_thr: float or str
+                image thresholding applied to the Frangi filter response
+
+            msk_bc: bool
+                if True, mask neuronal bodies within
+                the optionally provided channel
+
+            hsv_cmap: bool
+                generate HSV colormap of 3D fiber orientations
+
+            exp_all: bool
+                export all images
+
+            rsz: numpy.ndarray (shape=(3,), dtype=float)
+                3D image resize ratio
+
+            ram: float
+                    maximum RAM available to the Frangi filter stage [B]
+
+            jobs: int
+                number of parallel jobs (threads)
+                used by the Frangi filter stage
+
+            batch: int
+                slice batch size
+
+            slc_shp: numpy.ndarray (shape=(3,), dtype=int)
+                shape of the basic image slices
+                analyzed using parallel threads [px]
+
+            ovlp: int
+                overlapping range between image slices along each axis [px]
+
+            tot_slc: int
+                total number of image slices
+
+            z_out: NumPy slice object
+                output z-range
+
+    out_rng: NumPy slice object
+        output range
+
+    ts_msk_rsz: numpy.ndarray (dtype=bool)
+        tissue reconstruction binary mask
 
     Returns
     -------
@@ -447,21 +1030,6 @@ def analyze_fibers(fbr_slc, cfg, out_rng, pad_rng, ts_msk=None, _fa=False):
             fbr_msk: numpy.ndarray (axis order=(Z,Y,X), dtype=uint8)
                 fiber mask slice
     """
-    # preprocess fiber slice (adaptive blurring and downsampling)
-    iso_fbr_slc, pad_rsz, ts_msk_rsz = \
-        correct_anisotropy(fbr_slc, cfg['rsz'], sigma=cfg['smooth_sd'], pad=pad_rng, ts_msk=ts_msk)
-
-    # pad fiber slice if required
-    if pad_rsz is not None:
-        iso_fbr_slc = np.pad(iso_fbr_slc, pad_rsz, mode='reflect')
-
-        # pad tissue mask if available
-        if ts_msk_rsz is not None:
-            ts_msk_rsz = np.pad(ts_msk_rsz, pad_rsz, mode='constant')
-
-    # 3D Frangi filter
-    out_slc = frangi_filter(iso_fbr_slc, scales_px=cfg['scales_px'],
-                            alpha=cfg['alpha'], beta=cfg['beta'], gamma=cfg['gamma'], hsv=cfg['hsv_cmap'], _fa=_fa)
 
     # crop resulting slices
     out_slc.update({'iso': iso_fbr_slc, 'ts_msk': ts_msk_rsz})
@@ -627,6 +1195,7 @@ def parallel_odf_over_scales(cli_args, save_dirs, out_img, img_name):
             parallel(delayed(odf_analysis)(out_img['vec'], out_img['iso'], px_sz, save_dirs, img_name,
                                            odf_norm=odf_norm, odf_deg=cli_args.odf_deg, odf_scale_um=s,
                                            exp_all=cli_args.exp_all) for s in cli_args.odf_res)
+
 
         print_flsh(f"\nODF and dispersion maps saved to: {save_dirs['odf']}\n")
 

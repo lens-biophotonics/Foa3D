@@ -6,6 +6,8 @@ from os import environ, path, unlink
 from shutil import rmtree
 from time import perf_counter
 
+import cupy as cp
+
 import numpy as np
 from astropy.visualization import make_lupton_rgb
 from joblib import dump, load
@@ -184,7 +186,7 @@ def detect_ch_axis(img):
     return ch_ax
 
 
-def divide_nonzero(nd_array1, nd_array2, new_val=1e-10):
+def divide_nonzero(nd_array1, nd_array2, new_val=1e-12):
     """
     Divide two arrays handling zero denominator values.
 
@@ -204,12 +206,14 @@ def divide_nonzero(nd_array1, nd_array2, new_val=1e-10):
     divided: numpy.ndarray
         divided array
     """
-    divisor = np.copy(nd_array2)
+
+    xp = np if isinstance(nd_array1, np.ndarray) else cp
+
+    divisor = xp.copy(nd_array2)
     divisor[divisor == 0] = new_val
-    divided = np.divide(nd_array1, divisor)
+    divided = xp.divide(nd_array1, divisor)
 
     return divided
-
 
 def elapsed_time(start_time):
     """

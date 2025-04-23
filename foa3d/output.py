@@ -96,7 +96,7 @@ def create_save_dirs(cli_args, in_img):
     return save_dirs
 
 
-def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', ram=None):
+def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', mem=None):
     """
     Save array to file.
 
@@ -117,7 +117,7 @@ def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', ram=None):
     fmt: str
         output format
 
-    ram: float
+    mem: float
         maximum RAM available
 
     Returns
@@ -125,10 +125,10 @@ def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', ram=None):
     None
     """
     # get maximum RAM and initialized array memory size
-    if ram is None:
-        ram = psutil.virtual_memory()[1]
+    if mem is None:
+        mem = psutil.virtual_memory()[1]
     itm_sz = get_item_size(nd_array.dtype)
-    dz = np.floor(ram / (itm_sz * np.prod(nd_array.shape[1:]))).astype(int)
+    dz = np.floor(mem / (itm_sz * np.prod(nd_array.shape[1:]))).astype(int)
     nz = np.ceil(nd_array.shape[0] / dz).astype(int)
 
     # check output format
@@ -150,7 +150,7 @@ def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', ram=None):
             for z in range(nz):
                 zs = z * dz
                 tif.write(nd_array[zs:zs + dz, ...],
-                          contiguous=True,
+                          compression='zlib',
                           resolution=(1 / px_sz_x, 1 / px_sz_y),
                           metadata=metadata)
 
@@ -164,7 +164,7 @@ def save_array(fname, save_dir, nd_array, px_sz=None, fmt='tiff', ram=None):
         raise ValueError("Unsupported data format!!!")
 
 
-def save_frangi_arrays(save_dir, img_name, out_img, ram=None):
+def save_frangi_arrays(save_dir, img_name, out_img, mem=None):
     """
     Save the output arrays of the Frangi filter stage to TIF files.
 
@@ -201,7 +201,7 @@ def save_frangi_arrays(save_dir, img_name, out_img, ram=None):
         px_sz: numpy.ndarray (shape=(3,), dtype=float)
             pixel size (Z,Y,X) [μm]
 
-    ram: float
+    mem: float
         maximum RAM available
 
     Returns
@@ -211,7 +211,7 @@ def save_frangi_arrays(save_dir, img_name, out_img, ram=None):
     # loop over output image dictionary fields and save to TIFF files
     for img_key in out_img.keys():
         if isinstance(out_img[img_key], np.ndarray) and img_key not in (None, 'iso'):
-            save_array(f'{img_key}_{img_name}', save_dir, out_img[img_key], out_img['px_sz'], ram=ram)
+            save_array(f'{img_key}_{img_name}', save_dir, out_img[img_key], out_img['px_sz'], mem=mem)
 
     print_flsh(f"\nFrangi filter arrays saved to: {save_dir}\n")
 

@@ -70,8 +70,8 @@ def get_cli_parser():
     cli_parser.add_argument('-j', '--jobs', type=int, default=None,
                             help='number of parallel threads used by the Frangi filter stage: '
                                  'use one thread per logical core if None')
-    cli_parser.add_argument('-r', '--ram', type=float, default=None,
-                            help='maximum RAM available to the Frangi filter stage [GB]: use all if None')
+    cli_parser.add_argument('-m', '--mem', type=float, default=None,
+                            help='maximum RAM available to the Frangi filter stage [GB]: use all if None. For gpu processing, maximum gpu VRAM')
     cli_parser.add_argument('--px-size-xy', type=float, default=1.0, help='lateral pixel size [μm]')
     cli_parser.add_argument('--px-size-z', type=float, default=1.0, help='longitudinal pixel size [μm]')
     cli_parser.add_argument('--psf-fwhm-x', type=float, default=1.0, help='PSF FWHM along horizontal x-axis [μm]')
@@ -98,6 +98,8 @@ def get_cli_parser():
     cli_parser.add_argument('-e', '--exp-all', action='store_true', default=False,
                             help='save the full range of images produced by the Frangi filter and ODF stages, '
                                  'e.g. for testing purposes (see documentation)')
+    cli_parser.add_argument('--gpu', action='store_true', default=False,
+                            help='Use GPU for the Frangi filter stage')
 
     cli_args = cli_parser.parse_args()
 
@@ -448,11 +450,12 @@ def get_resource_config(cli_args, frangi_cfg):
     None
     """
     jobs = cli_args.jobs
-    ram = cli_args.ram
-    if ram is not None:
-        ram *= 1024**3
+    mem = cli_args.mem
+    gpu = cli_args.gpu
+    if mem is not None:
+        mem *= 1024**3
 
-    frangi_cfg.update({'jobs': jobs, 'ram': ram})
+    frangi_cfg.update({'jobs': jobs, 'mem': mem, 'gpu': gpu})
 
 
 def load_microscopy_image(cli_args):
