@@ -122,7 +122,6 @@ def create_memory_map(dtype, shape=None, name='tmp', tmp=None, arr=None, mmap_mo
     if arr is None:
         _ = open(mmap_path, mode='w+')
         mmap = np.memmap(mmap_path, dtype=dtype, mode=mmap_mode, shape=shape)
-        mmap[:] = 0
     else:
         _ = dump(arr, mmap_path)
         mmap = load(mmap_path, mmap_mode=mmap_mode)

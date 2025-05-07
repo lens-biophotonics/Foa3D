@@ -164,10 +164,10 @@ def parallel_frangi_over_slices(cli_args, save_dirs, in_img):
 
                     cfg = frangi_cfg
 
-                    frangi, eigvec, eigval, st_eigval = frangi_filter(iso_fbr_slc, scales_px=cfg['scales_px'],
+                    frangi, eigvec, st_eigval = frangi_filter(iso_fbr_slc, scales_px=cfg['scales_px'],
                                 alpha=cfg['alpha'], beta=cfg['beta'], gamma=cfg['gamma'], gpu=cfg["gpu"],_fa=_fa)
 
-                    output_q.put([ts_msk_rsz, s, t_start, iso_fbr_slc, frangi, eigvec, eigval, st_eigval])
+                    output_q.put([ts_msk_rsz, s, t_start, iso_fbr_slc, frangi, eigvec, st_eigval])
 
                     input_q.task_done()
 
@@ -179,11 +179,11 @@ def parallel_frangi_over_slices(cli_args, save_dirs, in_img):
                         output_q.task_done()
                         break
 
-                    ts_msk_rsz, s, t_start, iso_fbr_slc, frangi, eigvec, eigval, st_eigval = got
+                    ts_msk_rsz, s, t_start, iso_fbr_slc, frangi, eigvec, st_eigval = got
 
                     cfg = frangi_cfg
 
-                    out_slc = frangi_filter_out(frangi, eigvec, eigval, st_eigval, hsv=cfg['hsv_cmap'], _fa=_fa)
+                    out_slc = frangi_filter_out(frangi, eigvec, st_eigval, hsv=cfg['hsv_cmap'], _fa=_fa)
 
                     out_slc = analyze_fibers_out(out_slc, iso_fbr_slc, cfg, s["out"], ts_msk_rsz)
 
@@ -405,10 +405,10 @@ def frangi_analysis(s, in_img, out_img, frangi_cfg, t_start, _fa=False):
 
         cfg = frangi_cfg
 
-        frangi, eigvec, eigval, st_eigval = frangi_filter(iso_fbr_slc, scales_px=cfg['scales_px'],
+        frangi, eigvec, st_eigval = frangi_filter(iso_fbr_slc, scales_px=cfg['scales_px'],
                                     alpha=cfg['alpha'], beta=cfg['beta'], gamma=cfg['gamma'], _fa=_fa)
 
-        out_slc = frangi_filter_out(frangi, eigvec, eigval, st_eigval, hsv=cfg['hsv_cmap'], _fa=_fa)
+        out_slc = frangi_filter_out(frangi, eigvec, st_eigval, hsv=cfg['hsv_cmap'], _fa=_fa)
 
         out_slc = analyze_fibers_out(out_slc, iso_fbr_slc, cfg, s["out"], ts_msk_rsz)
 

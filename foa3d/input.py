@@ -612,9 +612,11 @@ def load_data(in_img, msk_mip=False, min_freemem_prc=25.0):
             with tiff.TiffFile(in_img['path']) as tif:
 
                 # get image size [B]
+                n_pages = len(tif.pages)
                 page = tif.pages[0]
                 num_px = page.shape[0] * page.shape[1] * (page.shape[2] if len(page.shape) > 2 else 1)
-                img_sz = num_px * page.dtype.itemsize
+                page_sz = num_px * page.dtype.itemsize
+                img_sz = page_sz * n_pages
 
                 # load image into RAM
                 if img_sz < free_mem:

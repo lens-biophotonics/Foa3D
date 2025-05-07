@@ -424,13 +424,10 @@ def compute_scaled_orientation(scale_px, img, alpha=0.001, beta=1, gamma=None, g
 
     xp = np if isinstance(eigen1, np.ndarray) else cp
 
-    eigval = xp.stack(eigval, axis=-1)
-
-    eigval_np = eigval.get() if xp == cp else eigval
     eigvec_np = eigvec.get() if xp == cp else eigvec
     frangi_img_np = frangi_img.get() if xp == cp else frangi_img
 
-    return frangi_img_np, eigvec_np, eigval_np
+    return frangi_img_np, eigvec_np
 
 
 def init_frangi_arrays(in_img, cfg, tmp_dir):
@@ -633,9 +630,8 @@ def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, gpu=False
     ns = len(scales_px)
     frangi = np.zeros((ns,) + img.shape, dtype='float32')
     eigvec = np.zeros((ns,) + img.shape + (3,), dtype='float32')
-    eigval = np.zeros((ns,) + img.shape + (3,), dtype='float32')
     for s in range(ns):
-        frangi[s], eigvec[s], eigval[s] = \
+        frangi[s], eigvec[s] = \
             compute_scaled_orientation(scales_px[s], img, alpha=alpha, beta=beta, gamma=gamma, gpu=gpu)
         
     if _fa:
@@ -643,9 +639,9 @@ def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, gpu=False
         for s in range(ns):
             st_eigval[s] = analyze_structure_tensor_eigen(img, scales_px[s], trunc=4, gpu=gpu)
 
-    return frangi, eigvec, eigval, st_eigval
+    return frangi, eigvec, st_eigval
 
-def frangi_filter_out(frangi, eigvec, eigval, st_eigval=None, hsv=False, _fa=False):
+def frangi_filter_out(frangi, eigvec, st_eigval=None, hsv=False, _fa=False):
 
     # get maximum response across the requested scales
     max_idx = np.expand_dims(np.argmax(frangi, axis=0), axis=0)
@@ -653,18 +649,17 @@ def frangi_filter_out(frangi, eigvec, eigval, st_eigval=None, hsv=False, _fa=Fal
 
     # select fiber orientation vectors (and the associated eigenvalues) among different scales
     max_idx = np.expand_dims(max_idx, axis=-1)
-    eigval = np.take_along_axis(eigval, max_idx, axis=0).squeeze(axis=0)
-    fbr_vec = np.take_along_axis(eigvec, max_idx, axis=0).squeeze(axis=0)
+    eigvec = np.take_along_axis(eigvec, max_idx, axis=0).squeeze(axis=0)
 
     # compute fractional anisotropy image and fiber orientation color map
     if _fa:
         st_eigval = np.take_along_axis(st_eigval, max_idx, axis=0).squeeze(axis=0)
         fa = compute_fractional_anisotropy(st_eigval)
 
-    fbr_clr = hsv_orient_cmap(fbr_vec) if hsv else rgb_orient_cmap(fbr_vec)
+    fbr_clr = hsv_orient_cmap(eigvec) if hsv else rgb_orient_cmap(eigvec)
 
     # fill slice output dictionary
-    out_slc = {'vec': fbr_vec, 'clr': fbr_clr, 'fa': fa, 'frangi': frangi}
+    out_slc = {'vec': eigvec, 'clr': fbr_clr, 'fa': fa, 'frangi': frangi}
 
     return out_slc
 
