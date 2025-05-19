@@ -42,7 +42,7 @@
     ],
     "dateModified": "2025-02-10",
     "description": "Foa3D (3D Fiber Orientation Analysis) is a Python tool for multiscale nerve fiber enhancement and 3D orientation analysis in large high-resolution volumetric images acquired by two-photon scanning or light-sheet fluorescence microscopy.",
-    "downloadUrl": "https://github.com/lens-biophotonics/Foa3D/archive/refs/heads/main.zip",
+    "downloadUrl": "https://github.com/lens-biophotonics/Foa3D/archive/refs/tags/v0.1.0.zip",
     "identifier": "34f53a74-50f0-49df-a437-043a4dbc5c5b",
     "keywords": [
         "3D fluorescence microscopy",
