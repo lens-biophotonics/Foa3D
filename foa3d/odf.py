@@ -135,20 +135,20 @@ def compute_orientation_dispersion(vec_tnsr_eig, odi_pri, odi_sec, odi_tot, odi_
     # primary dispersion (0.3183098861837907 = 1/π)
     avte = np.abs(vec_tnsr_eig)
     if odi_pri is not None:
-        odi_pri[:] = (0.5 - 0.3183098861837907 * np.arctan2(avte[..., 2], avte[..., 1])).astype(np.float32)
+        odi_pri[:] = 2 * (0.5 - 0.3183098861837907 * np.arctan2(avte[..., 2], avte[..., 1])).astype(np.float32)
 
     # secondary dispersion
     if odi_sec is not None:
-        odi_sec[:] = (0.5 - 0.3183098861837907 * np.arctan2(avte[..., 2], avte[..., 0])).astype(np.float32)
+        odi_sec[:] = 2 * (0.5 - 0.3183098861837907 * np.arctan2(avte[..., 2], avte[..., 0])).astype(np.float32)
 
     # dispersion anisotropy
     if odi_anis is not None:
-        odi_anis[:] = (0.5 - 0.3183098861837907 \
-            * np.arctan2(avte[..., 2], np.abs(vec_tnsr_eig[..., 1] - vec_tnsr_eig[..., 0]))).astype(np.float32)
+        odi_anis[:] = 2 * (0.5 - 0.3183098861837907 *
+                    np.arctan2(avte[..., 2], np.abs(vec_tnsr_eig[..., 1] - vec_tnsr_eig[..., 0]))).astype(np.float32)
 
     # total dispersion
-    odi_tot[:] = (0.5 - 0.3183098861837907 *
-                  np.arctan2(avte[..., 2], np.sqrt(np.abs(np.multiply(avte[..., 1], avte[..., 0]))))).astype(np.float32)
+    odi_tot[:] = 2 * (0.5 - 0.3183098861837907 *
+                np.arctan2(avte[..., 2], np.sqrt(np.multiply(avte[..., 1], avte[..., 0])))).astype(np.float32)
 
 
 def compute_vec_tensor_eigen(fbr_vec):
