@@ -105,7 +105,7 @@ def compute_odf_map(fbr_vec, px_sz, odf, odi, fbr_dnst, vec_tnsr_eig, scale, nor
     return odf, fbr_dnst
 
 
-@njit(cache=True)
+#@njit(cache=True)
 def compute_orientation_dispersion(vec_tnsr_eig, odi_pri, odi_sec, odi_tot, odi_anis):
     """
     Compute orientation dispersion parameters.
