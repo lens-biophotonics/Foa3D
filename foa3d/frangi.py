@@ -381,7 +381,7 @@ def init_frangi_arrays(in_img, cfg, tmp_dir):
     # fiber channel arrays
     iso_fbr = create_memory_map('uint8', shape=tot_shp, name='iso', tmp=tmp_dir)
     if cfg['exp_all']:
-        frangi = create_memory_map('uint8', shape=tot_shp, name='frangi', tmp=tmp_dir)
+        frangi = create_memory_map('float32', shape=tot_shp, name='frangi', tmp=tmp_dir)
         fbr_msk = create_memory_map('uint8', shape=tot_shp, name='fbr_msk', tmp=tmp_dir)
 
         # soma channel array
@@ -678,7 +678,7 @@ def write_frangi_arrays(out_img, out_slc, rng, z_out=None):
 
     # optional output images: Frangi filter response
     if out_img['frangi'] is not None:
-        out_img['frangi'][rng] = (255 * out_slc['frangi'][z_out, ...]).astype(np.uint8)
+        out_img['frangi'][rng] = out_slc['frangi'][z_out, ...].astype(np.float32)
 
     # optional output images: fiber mask
     if out_img['fbr_msk'] is not None:
