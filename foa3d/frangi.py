@@ -246,9 +246,7 @@ def compute_structure_tensor(img, sigma=1, trunc=4, gpu=False):
     # Compute first-order derivatives
     image_cp = xp.array(img, dtype=xp.float32) if xp == cp else img
 
-    scaled_img = xndi.gaussian_filter(image_cp, sigma=1.5, output=xp.float32, truncate=trunc)
-
-    gradient_list = xp.gradient(scaled_img)
+    gradient_list = xp.gradient(image_cp)
 
     # Compute the outer product of gradients
     structure_tensor_elements = [
@@ -559,7 +557,7 @@ def init_frangi_arrays(in_img, cfg, tmp_dir):
     # fiber channel arrays
     iso_fbr = create_memory_map('uint8', shape=tot_shp, name='iso', tmp=tmp_dir)
     if cfg['exp_all']:
-        frangi = create_memory_map('uint8', shape=tot_shp, name='frangi', tmp=tmp_dir)
+        frangi = create_memory_map('float32', shape=tot_shp, name='frangi', tmp=tmp_dir)
         fbr_msk = create_memory_map('uint8', shape=tot_shp, name='fbr_msk', tmp=tmp_dir)
         fa = create_memory_map('float32', shape=tot_shp, name='fa', tmp=tmp_dir)
 
@@ -638,6 +636,8 @@ def frangi_filter(img, scales_px=1, alpha=0.001, beta=1.0, gamma=None, gpu=False
         st_eigval = np.zeros((ns,) + img.shape + (3,), dtype='float32')
         for s in range(ns):
             st_eigval[s] = analyze_structure_tensor_eigen(img, scales_px[s], trunc=4, gpu=gpu)
+    else:
+        st_eigval = None
 
     return frangi, eigvec, st_eigval
 
@@ -655,6 +655,8 @@ def frangi_filter_out(frangi, eigvec, st_eigval=None, hsv=False, _fa=False):
     if _fa:
         st_eigval = np.take_along_axis(st_eigval, max_idx, axis=0).squeeze(axis=0)
         fa = compute_fractional_anisotropy(st_eigval)
+    else:
+        fa = None
 
     fbr_clr = hsv_orient_cmap(eigvec) if hsv else rgb_orient_cmap(eigvec)
 
@@ -893,7 +895,7 @@ def write_frangi_arrays(out_img, out_slc, rng, z_out=None):
 
     # optional output images: Frangi filter response
     if out_img['frangi'] is not None:
-        out_img['frangi'][rng] = (255 * out_slc['frangi'][z_out, ...]).astype(np.uint8)
+        out_img['frangi'][rng] = (out_slc['frangi'][z_out, ...]).astype(np.float32)
 
     # optional output images: fiber mask
     if out_img['fbr_msk'] is not None:

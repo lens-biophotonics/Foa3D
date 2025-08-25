@@ -623,15 +623,17 @@ def get_slicing_config(in_img, frangi_cfg, mem_growth=149.7, shp_thr=7):
     mem = frangi_cfg['mem']
     gpu = frangi_cfg['gpu']
     if mem is None:
-        if gpu:
+        mem = psutil.virtual_memory()[1]
+        frangi_cfg["mem"] = mem
+
+    if gpu:
             nvidia_smi.nvmlInit()
             handle = nvidia_smi.nvmlDeviceGetHandleByIndex(0)
             mem_info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
             mem = mem_info.free
             nvidia_smi.nvmlShutdown()
             mem_growth = 180
-        else:
-            mem = psutil.virtual_memory()[1]
+            
     mem /= mem_growth
 
     # number of logical cores
@@ -643,7 +645,7 @@ def get_slicing_config(in_img, frangi_cfg, mem_growth=149.7, shp_thr=7):
     # compute the shape of basic microscopy image slices
     slc_shp = np.array([-1])
     if gpu:
-        batch_sz = np.min([1, num_cpu]).astype(int) + 1
+        batch_sz = 2
     else:
         batch_sz = np.min([jobs, num_cpu]).astype(int) + 1
     ovlp = compute_overlap(frangi_cfg['smooth_sd'], frangi_cfg['scales_px'], rsz_ratio=frangi_cfg['rsz'])

@@ -146,9 +146,9 @@ def parallel_frangi_over_slices(cli_args, save_dirs, in_img):
             num_cpu = get_available_cores()
             if jobs is None:
                 jobs = num_cpu
-            in_jobs = jobs // 2
-            out_jobs = jobs // 2
-            input_q = Queue(maxsize=20)
+            in_jobs = jobs // 3
+            out_jobs = jobs // 3 * 2
+            input_q = Queue(maxsize=10)
             output_q = Queue(maxsize=30)
 
             def frangi_worker():
